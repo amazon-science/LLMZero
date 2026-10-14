@@ -1,0 +1,135 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LLMZero"
+version = "1.0.0"
+description = "Multi Agent System for LLM Post Training"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "CC-BY-NC-4.0" }
+authors = [
+  { name = "AutoGluon Community" }
+]
+classifiers = [
+  "License :: Other/Proprietary License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+  "langgraph",
+  "chardet>=5.2.0",
+  "importlib-resources>=6.4.5",
+  "langchain>=0.3.3",
+  "langchain_openai>=0.2.2",
+  "langchain-anthropic>=0.3.15",
+  "langchain_aws>=0.2.29",
+  "pydantic>=2.9.2",
+  "hydra-core",
+  "matplotlib>=3.9.2",
+  "typer>=0.12.5",
+  "rich>=13.8.1",
+  "s3fs",
+  "flask>=2.2",
+  "fsspec",
+  "joblib>=1.4.2",
+  "python-calamine",
+  "tenacity>=8.2.2",
+  "torch",
+  "torchaudio",
+  "torchvision",
+  "pandas>=2.2",
+  "reportlab>=4.4.3",
+  "streamlit>=1.37",
+  "streamlit-aggrid>=1.0.2",
+  "streamlit-extras>=0.4",
+  "psutil>=5.9.8",
+  "peft>=0.15.2",
+  "opencv-python",
+  "fastmcp==2.8.1",
+  "aiohttp>=3.8.0",
+  "requests>=2.28.0",
+  "boto3>=1.28.0",
+  "mcp>=0.1.0",
+]
+
+[project.scripts]
+llmzero      = "autogluon.llmzero.cli.app:app"
+
+[project.optional-dependencies]
+dev = [
+  "black>=24",
+  "GitRepo>=1",
+  "pytest>=7",
+  "pytest-asyncio>=0.21.0",
+  "isort",
+  "ruff==0.4",
+]
+# Public verl GRPO/PPO training framework (default training_framework: verl_grpo).
+# Install with: pip install -e ".[verl]"
+# verl on PyPI may trail GitHub; if the pin is unavailable, install from source:
+#   pip install "verl @ git+https://github.com/volcengine/verl@v0.9.0"
+verl = [
+  "verl==0.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/autogluon/llmzero"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["autogluon.llmzero*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"autogluon.llmzero" = [
+  "configs/*.yaml",
+  "compute_infra/*/*.sh",
+]
+
+[tool.pytest.ini_options]
+testpaths = "tests"
+addopts = "--strict-markers"
+xfail_strict = true
+
+[tool.black]
+line-length = 119
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.isort]
+known_first_party = "autogluon.llmzero"
+known_third_party = [
+  "autogluon",
+  "joblib",
+  "langchain",
+  "numpy",
+  "omegaconf",
+  "openai",
+  "pandas",
+  "psutil",
+  "pydantic",
+  "pytest",
+  "requests",
+  "scipy",
+  "sklearn",
+  "tqdm",
+]
+line_length = 119
+profile = "black"
+
+[tool.codespell]
+skip = ".git,*.pdf,*.svg,*.ipynb,*.csv,"
+
+[tool.ruff]
+lint.ignore = [
+    "E501",  # Line too long
+    "E731",  # Do not assign a `lambda` expression, use a `def`
+    "E722",  # Do not use bare `except`
+]
+extend-exclude = ["__init__.py"]
+
+[tool.mypy]
+ignore_missing_imports = true

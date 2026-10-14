@@ -1,0 +1,32 @@
+**/__pycache__
+.ruff_cache/
+.pytest_cache/
+runs/
+**/*egg-info
+src/autogluon/llmzero/tools_registry/indices
+examples/temp*
+visualization
+
+# Saved docker images (multi-GB; never commit to the OSS repo)
+docker/*.tar
+docker/*.tar.gz
+docker/*.tar.zst
+docker/*.sqsh
+
+# Generated artifacts / run outputs (never commit)
+AutogluonModels/
+outputs/
+
+# Local developer cluster config — carries a real HF token + personal paths.
+# Only the constants/cluster.*.example.json templates are committed; the live
+# cluster.json stays local and untracked so its secrets can never be committed.
+constants/cluster.json
+
+# Secret-bearing / local-only files
+.env
+*.pem
+*.key
+**/settings.local.json
+
+# Internal Claude Code dev-guidance file (not shipped in the public release)
+CLAUDE.md

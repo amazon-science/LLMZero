@@ -1,0 +1,25 @@
+{
+  "compute_backend": "slurmdocker",
+
+  "slurm_partition": "<slurm-partition>",
+  "slurm_account": "",
+  "slurm_time_limit": "30-00:00:00",
+
+  "docker_image": "/path/to/LLMZero/docker/llmzero-verl-0.9.0.sqsh",
+  "docker_mount_dirs": ["/fsx:/fsx", "/opt/dlami/nvme:/opt/dlami/nvme"],
+
+  "job_parallel": 4,
+
+  "nnodes": 1,
+  "n_gpus_per_node": 8,
+  "model_path_prefix": "/fsx/models",
+  "default_model": "Qwen/Qwen3-4B",
+  "wandb_api_key": "",
+  "runs_root": "/fsx/runs/LLMZeroCCRuns",
+  "verl_output_dir": "/fsx/runs/verl_runs",
+  "llmzero_path": "/path/to/LLMZero",
+  "llmzero_default_config": "/path/to/LLMZero/src/autogluon/llmzero/configs/default.yaml",
+  "hf_token": "",
+  "init_response_length_floor": 4096,
+  "init_response_length_ceiling": 8192
+}

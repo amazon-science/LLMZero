@@ -1,0 +1,111 @@
+# Task: Supervised fine-tuning (LoRA) of Qwen3-4B on a distilled chain-of-thought dataset (Bespoke-Stratos-17k); tune hyperparameters to minimize the validation loss (val/loss) on a held-out MATH-500 set.
+
+Framework: verl_sft (verl 0.9.0 supervised fine-tuning). Compute: slurmdocker, 1 node x 8 GPUs, <slurm_partition>, verl container (docker/llmzero-verl-0.9.0.sqsh).
+This is supervised fine-tuning on a `messages`-schema parquet — NO reward function, NO rollouts. Loss is computed only on assistant turns.
+
+## Container setup
+The training container already has verl 0.9.0 + torch + vllm. `pip install math_verify latex2sympy2_extended`
+is needed ONLY for the standalone before/after EVAL step (math scoring); it is NOT needed for the SFT
+training step itself. LLMZero MCTS runs only exercise the training step, so no extra install is required
+there. The gated GPQA-Diamond eval set needs HF_TOKEN (export via `${HF_TOKEN}`) — training does not.
+
+## How to launch
+Generate a bash entry-point script that runs verl SFT via torchrun (verl spawns its own FSDP workers;
+do NOT wrap in ray/mpirun). Use ABSOLUTE paths under the run folder for data, checkpoints, and
+`trainer.default_local_dir`. Do NOT pre-create `trainer.default_local_dir`; verl creates it.
+
+REQUIRED on the slurmdocker backend: prefix the torchrun command with
+`env -u RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES`. The backend exports that variable (=1) for the
+GRPO Ray-actor path; the SFT trainer runs under torchrun/SPMD (not a Ray actor), where that variable
+makes verl call `ray.get_runtime_context().get_accelerator_ids()["GPU"][0]` on an EMPTY list ->
+`IndexError: list index out of range` at Worker init. Unsetting it makes verl use torchrun's
+LOCAL_RANK to select the device. Keep the `env -u` prefix verbatim.
+
+Reference training command (copy verbatim; substitute the placeholder paths):
+
+    # <RUN>   = the LLMZero run folder, e.g. /fsx/users/example/LLMZeroCCRuns/run_.../
+    # <MODEL> = /fsx/users/example/models/Qwen/Qwen3-4B
+    # <DATA>  = <RUN>/data          <CKPTS> = <RUN>/verl_ckpts
+    env -u RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES \
+    torchrun --standalone --nnodes=1 --nproc_per_node=8 -m verl.trainer.sft_trainer \
+      --config-name=sft_trainer_engine \
+      data.train_files="['<DATA>/train.parquet']" \
+      data.val_files="['<DATA>/val.parquet']" \
+      data.messages_key=messages \
+      data.max_length=16384 \
+      data.truncation=right \
+      data.ignore_input_ids_mismatch=true \
+      data.max_token_len_per_gpu=16384 \
+      data.train_batch_size=64 \
+      data.micro_batch_size_per_gpu=1 \
+      model.path="<MODEL>" \
+      model.lora_rank=64 \
+      model.lora_alpha=64 \
+      model.target_modules=all-linear \
+      optim.lr=1e-4 \
+      optim.lr_scheduler_type=cosine \
+      optim.lr_warmup_steps_ratio=0.03 \
+      trainer.total_epochs=1 \
+      trainer.save_freq=40 \
+      trainer.test_freq=40 \
+      trainer.logger="['console']" \
+      trainer.project_name=verl_sft_bespoke \
+      trainer.experiment_name=qwen3_4b_lora64 \
+      trainer.default_local_dir="<CKPTS>" \
+      checkpoint.save_contents="['model','optimizer','extra']" \
+      checkpoint.load_contents="['model','optimizer','extra']"
+
+verl SFT saves checkpoints FLAT under `<CKPTS>/global_step_N/` (NO `actor/` subdir, unlike GRPO). Each
+saved step carries model + optimizer + extra-state shards, so it is fully resumable for continuous training.
+For MCTS-chained child nodes, LLMZero appends the resume-block overrides below (see Notes).
+
+## Fixed inputs (do NOT change)
+- model.path=<MODEL> — the base model is fixed; changing it invalidates the checkpoint/optimizer state.
+- data.messages_key=messages and the parquet `messages` schema (list of {role, content} dicts; loss on
+  assistant turns only). Do NOT change the schema or the messages key.
+- checkpoint.save_contents=["model","optimizer","extra"] and checkpoint.load_contents=["model","optimizer","extra"].
+  These three-part contents are what make a checkpoint resumable (model + optimizer momentum/second-moment
+  + LR-scheduler + RNG). Do NOT reduce to weights-only (["hf_model"]) — that breaks optimizer-state continuation.
+- model.lora_rank and model.lora_alpha MUST stay IDENTICAL across a resume chain. They are locked by the
+  checkpoint being resumed; changing either makes optimizer/model state fail to load.
+- trainer.logger=["console"] on slurmdocker. WANDB env vars do NOT propagate to verl's internal workers on
+  slurmdocker; using wandb crashes with "No API key configured". Keep console-only.
+
+## Tunable hyperparameters
+(pulled from verl_sft/hyperparameters.py — the proposer tunes within these categories)
+- Optimizer & schedule:
+  - optim.lr — peak AdamW learning rate. Too high spikes/diverges val/loss; too low wastes the budget.
+    LoRA typically 5e-5–2e-4.
+  - optim.lr_scheduler_type — 'constant' or 'cosine'. Cosine+warmup usually gives a smoother, lower final val/loss.
+  - optim.weight_decay — AdamW weight decay (mild regularization; too high underfits the SFT target).
+  - optim.lr_warmup_steps_ratio — fraction of total steps warming LR from 0. Short warmup (0.0–0.05) stabilizes
+    early steps; too long shortens effective training.
+  - optim.clip_grad — gradient-norm clip threshold. 1.0 is a safe default.
+- Batch & sequence:
+  - data.train_batch_size — global batch (samples per optimizer step). Larger = smoother gradients, fewer steps/epoch.
+  - data.micro_batch_size_per_gpu — per-GPU micro-batch for gradient accumulation. Raise to use the GPU better; too high OOMs at long max_length.
+  - data.max_length — max tokens per example (prompt+response). Must cover the distilled CoT (Bespoke-Stratos is long, ~8k–16k); higher costs memory/time.
+- LoRA:
+  - model.lora_rank — adapter rank (capacity vs params/memory). LOCKED across a resume chain.
+  - model.lora_alpha — LoRA scaling (adapter effective LR ∝ alpha/rank). Commonly = rank. LOCKED across a resume chain.
+  - model.target_modules — which linears get adapters ('all-linear' or a name list). Broader = more capacity + cost.
+- Training length:
+  - trainer.total_epochs — passes over the training data. More epochs can overfit the distillation set (watch val/loss turning up).
+  - trainer.total_training_steps — hard cap on optimizer steps (overrides epochs when set). On resume it MUST exceed the checkpoint's step to progress.
+
+## Notes
+- LLMZero tracks a SINGLE validation metric: val/loss (validation cross-entropy on the val set's assistant
+  turns). LOWER IS BETTER — score_direction is MINIMIZE. Judge success by val/loss; train/loss, train/grad_norm,
+  and train/lr are diagnostics only.
+- Continuous training resumes the FULL training state (optimizer momentum + second-moment + LR schedule + RNG),
+  not just weights. For MCTS-chained child nodes LLMZero appends:
+      trainer.resume_mode=resume_path
+      trainer.resume_from_path=<CKPTS>/global_step_N
+      checkpoint.save_contents=["model","optimizer","extra"]
+      checkpoint.load_contents=["model","optimizer","extra"]
+- verl inherits the global step from the `global_step_N` folder name. On resume, set
+  trainer.total_training_steps GREATER than N or the run makes zero progress (it is already "done").
+- If you changed data.train_batch_size / data.num_workers (or the worker count) between parent and child,
+  delete the stale dataloader state first:  rm -f <CKPTS>/global_step_N/data_*.pt
+- Checkpoints are flat `global_step_N/` directories (no `actor/` subdir). A resumable checkpoint holds
+  model_world_size_*_rank_*.pt AND optim_world_size_*_rank_*.pt AND extra_state_world_size_*_rank_*.pt.

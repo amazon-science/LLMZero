@@ -1,0 +1,29 @@
+# LLMZero training image — verl 0.9.0 GPU training environment.
+#
+# Base: verl's official prebuilt "vllm024" stable image (vllm 0.24.0 / torch 2.11.0
+#   / CUDA 13.0.2 / Ubuntu 24.04 / Python 3.12 / transformers 5.3.0), the dependency
+#   stack verl 0.9.x is built against.
+#   https://hub.docker.com/r/verlai/verl  (tag vllm024.dev2)
+#   NOTE: verl's README advertises `vllm024.latest`, but as of 2026-09 that tag is
+#   not yet published on Docker Hub — use `vllm024.dev2` (the current 0.24.0 prebuilt).
+#
+# The prebuilt verlai images bake verl's full dependency closure but uninstall
+# the `verl` package itself (so a dev can mount their own checkout). We install
+# verl 0.9.0 on top so the image is a ready-to-run training environment.
+#
+# This image contains the verl training stack only — LLMZero (the orchestration
+# agent) runs outside the container and submits jobs into it via the docker /
+# slurmdocker / raycluster backends.
+#
+# NOTE: match the prebuilt base tag to the verl version. verl 0.9.0 requires
+# vllm>=0.18.0 and ships against vllm 0.24.0; the vllm024 prebuilt is the
+# verl-blessed match. Do NOT pair verl 0.9.0 with the older vllm017 base.
+
+ARG BASE_IMAGE=verlai/verl:vllm024.dev2
+FROM ${BASE_IMAGE}
+
+ARG VERL_VERSION=v0.9.0
+
+# Install verl 0.9.0 and keep it (the base image ships deps but not verl itself).
+RUN pip install --no-deps "git+https://github.com/verl-project/verl.git@${VERL_VERSION}" && \
+    python -c "import verl; print('verl', open(verl.__path__[0] + '/version/version').read().strip())"

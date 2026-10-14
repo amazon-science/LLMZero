@@ -1,0 +1,205 @@
+# Tutorial Prompt Generator Configuration
+
+per_execution_timeout: 144000
+
+# Training Framework Configuration
+# Selects the framework plugin that supplies ALL framework-specific knowledge:
+# hyperparameter/metric descriptions, the score direction (maximize vs minimize),
+# the stdout parser, the observer set (build_observers), checkpoint logic, and
+# proposer/early-stopper prompt fragments -- not just HP/metric descriptions.
+# Available: verl_grpo (or register custom frameworks via the training_frameworks registry).
+# See src/autogluon/llmzero/training_frameworks/README.md for the full guide.
+training_framework: verl_sft
+
+# Validation Configuration
+# Regex pattern to match metric names for validation score (used by the ValidationObserver).
+# The first metric matching this pattern is selected and recorded at first validation,
+# then consistently used for all subsequent validations throughout the run.
+# Required for MCTS node evaluation - without it, nodes cannot be compared.
+# This config key OVERRIDES the selected framework's validation_metric_pattern() default,
+# and is OPTIONAL when that framework already supplies one (verl_grpo does: "val-core/.*__dev").
+
+# Validation score reduction mode: how a run's per-step validation metric becomes the
+# node's MCTS score. One of:
+#   best_validation  (default) - report the direction-aware best across the run
+#                                (highest for maximize, lowest for minimize)
+#   final_validation           - report the last recorded value (e.g. a running-average
+#                                time/step metric for throughput optimization; pair with a
+#                                framework whose score_direction() is "minimize")
+# Defaults to best_validation when unset.
+validation_score_mode: best_validation
+# This pattern is framework-dependent (different frameworks log validation metrics differently).
+# Example patterns:
+#   - "val-core/.*__dev" - matches val-core/simulation__codeio__dev/reward/mean@1
+#   - "core/.*__dev"     - matches core/logic__ordering_puzzle_dataset__dev/reward/mean@1
+validation_metric_pattern: "val/loss"
+
+# MCTS (Monte Carlo Tree Search) parameters
+exploration_constant: 1.414    # Controls exploration vs exploitation trade-off in UCT formula (higher = more exploration)
+max_debug_depth: 5        # Maximum depth of debug nodes in the search tree
+failure_offset: 2             # Number of failures to ignore before applying failure penalty
+failure_penalty_weight: 0.5   # Weight of the penalty for failed executions in UCT calculation
+early_stop_penalty_weight: 0.3 # Weight of the penalty for early-stopped (incomplete) runs in UCT calculation
+initial_root_children: 1      # Maximum number of child nodes from root before considering fully expanded
+max_debug_children: 3         # Maximum number of debug child nodes for a single parent node
+max_evolve_children: 2        # Maximum number of evolution child nodes for a single parent node
+score_temperature: 0.3        # Min-max exponential normalization temperature (lower = sharper, favors high scores; scale-invariant)
+sibling_dedup: true           # When enabled, proposer sees what sibling nodes already tried to avoid duplicate proposals
+
+# Data Perception
+max_file_group_size_to_show: 5
+num_example_files_to_show: 1
+
+max_chars_per_file: 768
+num_tutorial_retrievals: 30
+max_num_tutorials: 5
+max_user_input_length: 2048
+max_tutorial_length: 32768
+configure_env: false
+condense_tutorials: True
+use_tutorial_summary: True
+stop_after_success: False
+optimize_system_resources: False
+cleanup_unused_env: True
+
+# Compute Infrastructure Configuration
+# Backend for submitting training jobs. Supports: raycluster, conda, docker, slurmdocker
+compute_infra:
+  # slurmdocker backend written in full here because the `llmzero` run-agent CLI maps
+  # --docker-image/--mount-dir to image/mount_dirs, but slurmdocker validate_config
+  # requires container_image/container_mounts -> CLI flags alone fail validation.
+  type: slurmdocker
+  partition: <slurm_partition>
+  container_image: "/fsx/users/example/LLMZero/docker/llmzero-verl-0.9.0.sqsh"
+  container_mounts: ["/fsx:/fsx", "/opt/dlami/nvme:/opt/dlami/nvme"]
+  num_nodes: 1
+  gpus_per_node: 8
+  time_limit: "3-00:00:00"
+  container_env: {"HF_TOKEN": "${HF_TOKEN}"}
+  # entrypoint_num_gpus: 8  # routes ray job entrypoint to GPU workers
+  # --- conda backend (uncomment and set type: conda to use) ---
+  # type: conda
+  # conda_env: "my_rl_env"
+  # num_gpus: 8
+  # --- docker backend (uncomment and set type: docker to use) ---
+  # type: docker
+  # image: "llmzero-verl:0.7.1"  # built via docker/build.sh; or any local, Docker Hub, or ECR URI
+  # gpu: "all"
+  # shm_size: "16g"
+  # mount_dirs: ["/home/ubuntu/runs", "/home/ubuntu/models"]  # identity-mount host dirs so paths work inside container
+  # volumes: ["/data:/workspace/data"]  # explicit host:container mounts (for non-identity mounts)
+  # --- slurmdocker backend (uncomment and set type: slurmdocker to use) ---
+  # type: slurmdocker
+  # partition: gpu                       # Slurm partition name
+  # container_image: "my-training.sqsh"  # enroot .sqsh file or registry URI
+  # container_mounts: ["/data:/data"]    # host:container bind mounts
+  # num_nodes: 1
+  # gpus_per_node: 8
+  # time_limit: "1-00:00:00"
+  # account: my-slurm-account
+  # --- slurm backend (conda-based, multi-node Ray; uncomment and set type: slurm to use) ---
+  # type: slurm
+  # partition: gpu                         # Slurm partition name
+  # conda_env: "my_rl_env"                 # conda env activated on compute nodes
+  # num_nodes: 1
+  # gpus_per_node: 8
+  # time_limit: "30-00:00:00"
+  # account: my-slurm-account
+
+# Default LLM Configuration
+# For each agent (coder, etc.) you can use a different one
+llm: &default_llm
+  # Note: bedrock is only supported in limited AWS regions
+  #       and requires AWS credentials
+  provider: bedrock
+  model: "us.anthropic.claude-opus-4-8"
+  max_tokens: 64000
+  proxy_url: null
+  temperature: null  # Opus 4.8 rejects non-default temperature
+  top_p: 0.9
+  verbose: True
+  multi_turn: False
+  template: null
+  add_coding_format_instruction: false
+
+bash_coder:
+  <<: *default_llm  # Merge llm_config
+  multi_turn: False  # Keep stateless for scalability with many nodes
+
+proposer_llm:
+  <<: *default_llm  # Merge llm_config
+  model: "us.anthropic.claude-opus-4-8"
+  max_tokens: 64000  # Opus 4.8 max output limit
+  temperature: null  # Opus 4.8 rejects non-default temperature
+  top_p: 0.95       # Higher top_p for more diverse token sampling
+  multi_turn: False # Keep stateless for scalability with many nodes
+
+executer:
+  <<: *default_llm  # Merge llm_config
+
+error_analyzer:
+  <<: *default_llm  # Merge llm_config
+
+agentic_proposer:
+  num_samples: 10         # Number of uniform samples for training/validation metrics (for text summaries)
+  use_average: true       # Whether to average within segments (true) or sample at points (false)
+
+  # Metrics to include in text summaries (empty list = no text summaries)
+  # These metrics will be shown as numerical progressions
+  text_metrics:
+    - "train/loss"
+    - "val/loss"
+
+  # Metrics to visualize as plots (empty list = no plots)
+  # These metrics will be shown as visual charts over training steps
+  # Metrics can appear in both text_metrics and plot_metrics (e.g., rewards as both text AND plot)
+  plot_metrics:
+    - "train/loss"
+    - "val/loss"
+    - "train/grad_norm"
+    - "train/lr"
+
+  # Note: Validation metrics matching validation_metric_pattern are automatically included in plots
+
+# Checkpoint-based optimization
+# DISABLED for this run: SFT here needs only a single-shot config per node (no
+# continuous training / optimizer-state resume). With enabled=False, node_manager
+# marks EVERY node from_scratch (node_manager.py:982-986, early-return before any
+# step-budget resolution) and the verl_sft plugin appends NO resume block
+# (checkpoints.py:45). Each node trains its OWN full config from base weights,
+# length governed by trainer.total_epochs in the node's own training script.
+# Pure hyperparameter search, no checkpoint chaining, no max_steps_per_node cap.
+checkpoint_optimization:
+  enabled: False
+  min_from_scratch_ratio: 1.0  # moot when disabled; all nodes from scratch
+  clean_ckpt: True             # still delete unused ckpts to save disk
+  max_steps_per_node: 100      # moot when disabled (never resolved for from-scratch path)
+  # Checkpoint stdout grammar (save marker / path / embedded step) is owned by the
+  # training framework's parser (training_frameworks/<name>/parser.py), not config.
+
+# Early Stopper Configuration
+# Compares current training run with best previous run at checkpoint intervals
+early_stopper:
+  enabled: true                     # Enable/disable early stopping
+  checkpoint_interval_seconds: 900  # Time between checkpoint evaluations (15 minutes)
+  min_steps_before_early_stop: 20   # Skip early stopping for the first N steps of each run
+
+  # Number of samples for metric summaries
+  num_samples: 10
+  use_average: true
+
+  # Metrics to include in text comparison analysis (empty list = no text analysis)
+  text_metrics:
+    - "train/loss"
+    - "val/loss"
+
+  # Metrics to visualize as comparison plots (empty list = no plots)
+  # Each plot shows current run (blue) vs best run (green) overlay
+  # Metrics can appear in both text_metrics and plot_metrics
+  plot_metrics:
+    - "train/loss"
+    - "val/loss"
+    - "train/grad_norm"
+    - "train/lr"
+
+  # Note: Validation metrics matching validation_metric_pattern are automatically included in plots

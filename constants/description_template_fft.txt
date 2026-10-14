@@ -1,0 +1,511 @@
+**Task:** Train `{{MODEL_NAME}}` on the specified dataset using GRPO. Optimize to maximize model performance.
+
+---
+
+**Package Default Configuration (reference only)**
+
+The Reference Bash Script below is your starting point — it overrides this base config. On any conflict, bash script values win. You may propose additional HP changes to override defaults not covered by the bash script. Use `++` prefix for parameters not already in the base config.
+
+```yaml
+actor_rollout_ref:
+  actor:
+    _target_: verl.workers.config.FSDPActorConfig
+    strategy: fsdp2
+    ppo_mini_batch_size: 32
+    ppo_micro_batch_size: null
+    ppo_micro_batch_size_per_gpu: 2
+    use_dynamic_bsz: true
+    ppo_max_token_len_per_gpu: 12288
+    clip_ratio: 0.2
+    clip_ratio_low: 0.2
+    clip_ratio_high: 0.2
+    policy_loss:
+      _target_: verl.workers.config.PolicyLossConfig
+      loss_mode: vanilla
+      clip_cov_ratio: 0.0002
+      clip_cov_lb: 1.0
+      clip_cov_ub: 5.0
+      kl_cov_ratio: 0.0002
+      ppo_kl_coef: 0.1
+    clip_ratio_c: 3.0
+    loss_agg_mode: token-mean
+    entropy_coeff: 0
+    entropy_advantage: false
+    entropy_advantage_alpha: 0.4
+    entropy_advantage_kappa: 2
+    use_kl_loss: true
+    use_torch_compile: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    ppo_epochs: 1
+    shuffle: false
+    checkpoint:
+      _target_: verl.trainer.config.CheckpointConfig
+      save_contents:
+      - hf_model
+      load_contents:
+      - hf_model
+      async_save: false
+    optim:
+      lr: 1.0e-06
+      lr_warmup_steps_ratio: 0.0
+      total_training_steps: -1
+      weight_decay: 0.01
+      lr_warmup_steps: -1
+      _target_: verl.workers.config.FSDPOptimizerConfig
+      min_lr_ratio: 0.0
+      num_cycles: 0.5
+      warmup_style: constant
+    use_fused_kernels: false
+    grad_clip: 1.0
+    ulysses_sequence_parallel_size: 1
+    entropy_from_logits_with_chunking: false
+    entropy_checkpointing: false
+    fsdp_config:
+      _target_: verl.workers.config.FSDPEngineConfig
+      wrap_policy:
+        min_num_params: 0
+      param_offload: false
+      optimizer_offload: true
+      offload_policy: false
+      reshard_after_forward: true
+      fsdp_size: -1
+      forward_prefetch: false
+      model_dtype: bfloat16
+    use_remove_padding: true
+  ref:
+    strategy: fsdp2
+    use_torch_compile: true
+    log_prob_micro_batch_size: null
+    log_prob_micro_batch_size_per_gpu: 16
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 12288
+    fsdp_config:
+      _target_: verl.workers.config.FSDPEngineConfig
+      wrap_policy:
+        min_num_params: 0
+      param_offload: false
+      reshard_after_forward: true
+      forward_prefetch: false
+      model_dtype: bfloat16
+    ulysses_sequence_parallel_size: 1
+    entropy_from_logits_with_chunking: false
+    entropy_checkpointing: false
+  rollout:
+    name: vllm
+    mode: sync
+    temperature: 1.0
+    top_k: -1
+    top_p: 1
+    prompt_length: 512
+    response_length: 1024
+    dtype: bfloat16
+    gpu_memory_utilization: 0.6
+    ignore_eos: false
+    enforce_eager: false
+    free_cache_engine: true
+    tensor_model_parallel_size: 2
+    max_num_batched_tokens: 8192
+    max_model_len: null
+    max_num_seqs: 1024
+    log_prob_micro_batch_size: null
+    log_prob_micro_batch_size_per_gpu: 16
+    log_prob_use_dynamic_bsz: true
+    log_prob_max_token_len_per_gpu: 12288
+    disable_log_stats: true
+    do_sample: true
+    'n': 8
+    multi_stage_wake_up: false
+    engine_kwargs:
+      vllm:
+        swap_space: null
+        disable_mm_preprocessor_cache: false
+      sglang:
+        attention_backend: null
+    val_kwargs:
+      top_k: -1
+      top_p: 1.0
+      temperature: 0
+      'n': 1
+      do_sample: false
+    multi_turn:
+      enable: false
+      max_assistant_turns: null
+      tool_config_path: null
+      max_user_turns: null
+      max_parallel_calls: 1
+      max_tool_response_length: 256
+      tool_response_truncate_side: middle
+      interaction_config_path: null
+      use_inference_chat_template: false
+      tokenization_sanity_check_mode: strict
+      format: hermes
+    calculate_log_probs: false
+    agent:
+      num_workers: 8
+      agent_loop_config_path: null
+      custom_async_server:
+        path: null
+        name: null
+    update_weights_bucket_megabytes: 512
+    trace:
+      backend: null
+      token2text: false
+    enable_chunked_prefill: true
+    load_format: safetensors
+    layered_summon: true
+    merge_lora_for_inference: false
+  hybrid_engine: true
+  model:
+    path: /opt/dlami/nvme/models/{{MODEL_NAME}}
+    custom_chat_template: null
+    use_shm: false
+    external_lib: null
+    override_config: {}
+    enable_gradient_checkpointing: true
+    enable_activation_offload: false
+    use_remove_padding: true
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+    exclude_modules: null
+    use_liger: false
+    use_fused_kernels: false
+    fused_kernel_options:
+      impl_backend: torch
+    trust_remote_code: false
+  profiler:
+    _target_: verl.utils.profiler.ProfilerConfig
+    discrete: false
+    all_ranks: false
+    ranks: []
+trainer:
+  npu_profile:
+    options:
+      save_path: ./profiler_data
+      roles:
+      - all
+      level: level1
+      with_memory: false
+      record_shapes: false
+      with_npu: true
+      with_cpu: true
+      with_module: false
+      with_stack: false
+      analysis: true
+  balance_batch: true
+  total_epochs: 2
+  total_training_steps: null
+  profile_steps: null
+  controller_nsight_options:
+    trace: cuda,nvtx,cublas,ucx
+    cuda-memory-usage: 'true'
+    cuda-graph-trace: graph
+  worker_nsight_options:
+    trace: cuda,nvtx,cublas,ucx
+    cuda-memory-usage: 'true'
+    cuda-graph-trace: graph
+    capture-range: cudaProfilerApi
+    capture-range-end: null
+    kill: none
+  project_name: example_project
+  experiment_name: example_experiment
+  logger:
+  - console
+  - tensorboard
+  log_val_generations: 0
+  rollout_data_dir: null
+  validation_data_dir: null
+  nnodes: 1
+  n_gpus_per_node: 8
+  save_freq: 20
+  esi_redundant_time: 0
+  resume_mode: auto
+  resume_from_path: null
+  val_before_train: true
+  val_only: false
+  test_freq: 7
+  critic_warmup: 0
+  default_hdfs_dir: null
+  del_local_ckpt_after_load: false
+  default_local_dir: /path/to/verl_output/example_project/example_experiment/
+  max_actor_ckpt_to_keep: null
+  max_critic_ckpt_to_keep: null
+  ray_wait_register_center_timeout: 300
+  device: cuda
+  use_custom_rollouts: false
+  custom_rollout:
+    path: None
+    name: None
+  use_legacy_worker_impl: auto
+  merge_lora_on_final_save: true
+data:
+  tokenizer: null
+  use_shm: false
+  train_files: /path/to/data/train.parquet
+  val_files: /path/to/data/val.parquet
+  prompt_key: prompt
+  reward_fn_key: data_source
+  max_prompt_length: 512
+  max_response_length: 1024
+  train_batch_size: 128
+  val_batch_size: 256
+  return_raw_input_ids: false
+  return_raw_chat: false
+  return_full_prompt: false
+  shuffle: false
+  dataloader_num_workers: 8
+  validation_shuffle: false
+  apply_chat_template_kwargs:
+    enable_thinking: true
+  filter_overlong_prompts: true
+  filter_overlong_prompts_workers: 1
+  truncation: error
+  image_key: images
+  video_key: videos
+  trust_remote_code: false
+  custom_cls:
+    path: null
+    name: null
+  return_multi_modal_inputs: true
+  sampler:
+    class_path: null
+    class_name: null
+  datagen:
+    path: null
+    name: null
+critic:
+  _target_: verl.workers.config.FSDPCriticConfig
+  rollout_n: 6
+  strategy: fsdp
+  enable: null
+  optim:
+    lr: 1.0e-05
+    lr_warmup_steps_ratio: 0.0
+    total_training_steps: -1
+    weight_decay: 0.01
+    lr_warmup_steps: -1
+    _target_: verl.workers.config.FSDPOptimizerConfig
+    min_lr_ratio: null
+    warmup_style: constant
+  model:
+    path: ~/models/deepseek-llm-7b-chat
+    tokenizer_path: {{MODEL_NAME}}
+    override_config: {}
+    external_lib: null
+    trust_remote_code: false
+    _target_: verl.workers.config.FSDPCriticModelCfg
+    use_shm: false
+    enable_gradient_checkpointing: true
+    enable_activation_offload: false
+    use_remove_padding: false
+    fsdp_config:
+      _target_: verl.workers.config.FSDPEngineConfig
+      param_offload: false
+      optimizer_offload: false
+      offload_policy: false
+      reshard_after_forward: true
+      wrap_policy:
+        min_num_params: 0
+      fsdp_size: -1
+      forward_prefetch: false
+    lora_rank: 0
+    lora_alpha: 16
+    target_modules: all-linear
+  ppo_mini_batch_size: 256
+  ppo_micro_batch_size: null
+  ppo_micro_batch_size_per_gpu: null
+  use_dynamic_bsz: true
+  ppo_max_token_len_per_gpu: 24576
+  forward_max_token_len_per_gpu: 32768
+  ppo_epochs: 1
+  shuffle: false
+  cliprange_value: 0.5
+  loss_agg_mode: token-mean
+  checkpoint:
+    _target_: verl.trainer.config.CheckpointConfig
+    save_contents:
+    - hf_model
+    load_contents:
+    - hf_model
+    async_save: false
+  profiler:
+    _target_: verl.utils.profiler.ProfilerConfig
+    discrete: false
+    all_ranks: false
+    ranks: []
+  forward_micro_batch_size: null
+  forward_micro_batch_size_per_gpu: null
+  ulysses_sequence_parallel_size: 1
+  grad_clip: 1.0
+reward_model:
+  enable: false
+  strategy: fsdp
+  model:
+    input_tokenizer: {{MODEL_NAME}}
+    path: ~/models/FsfairX-LLaMA3-RM-v0.1
+    external_lib: null
+    trust_remote_code: false
+    use_shm: false
+    use_remove_padding: false
+    use_fused_kernels: false
+    fsdp_config:
+      _target_: verl.workers.config.FSDPEngineConfig
+      wrap_policy:
+        min_num_params: 0
+      param_offload: false
+      reshard_after_forward: true
+      fsdp_size: -1
+      forward_prefetch: false
+  micro_batch_size: null
+  micro_batch_size_per_gpu: null
+  max_length: null
+  use_dynamic_bsz: true
+  forward_max_token_len_per_gpu: 32768
+  reward_manager: prime
+  launch_reward_fn_async: true
+  sandbox_fusion:
+    url: null
+    max_concurrent: 64
+    memory_limit_mb: 1024
+  profiler:
+    _target_: verl.utils.profiler.ProfilerConfig
+    discrete: false
+    all_ranks: false
+    ranks: []
+  ulysses_sequence_parallel_size: 1
+custom_reward_function:
+  path: null
+  name: compute_score
+algorithm:
+  _target_: verl.trainer.config.AlgoConfig
+  gamma: 1.0
+  lam: 1.0
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: true
+  use_kl_in_reward: false
+  kl_penalty: kl
+  kl_ctrl:
+    _target_: verl.trainer.config.KLControlConfig
+    type: fixed
+    kl_coef: 0.001
+    horizon: 10000
+    target_kl: 0.1
+  use_pf_ppo: false
+  pf_ppo:
+    reweight_method: pow
+    weight_pow: 2.0
+ray_init:
+  num_cpus: null
+  timeline_json_file: null
+```
+
+---
+
+**Reference Bash Script (uses {{MODEL_NAME}}):**
+
+```bash
+set -x
+
+mkdir -p {{OUTPUT_DIR}}
+
+{{INSTALL_COMMANDS}}
+
+python3 -m verl.trainer.main_ppo \
+    data.train_files={{TRAIN_FILES}} \
+    data.val_files={{VAL_FILES}} \
+    actor_rollout_ref.model.path={{MODEL_PATH}} \
+    reward.reward_manager.name=naive \
+    reward.custom_reward_function.name={{REWARD_FN_NAME}} \
+    reward.custom_reward_function.path={{REWARD_FN_PATH}} \
+    trainer.logger={{TRAINER_LOGGER}} \
+    trainer.val_before_train=True \
+    trainer.project_name={{PROJECT_NAME}} \
+    trainer.experiment_name={{EXPERIMENT_NAME}} \
+    trainer.nnodes={{NNODES}} \
+    trainer.n_gpus_per_node={{N_GPUS_PER_NODE}} \
+    trainer.resume_mode=disable \
+    trainer.save_freq=20 \
+    trainer.test_freq=3 \
+    trainer.total_epochs=1 \
+    trainer.default_local_dir={{OUTPUT_DIR}} \
+    trainer.rollout_data_dir={{OUTPUT_DIR}} \
+    trainer.validation_data_dir={{OUTPUT_DIR}} \
+    hydra.run.dir={{OUTPUT_DIR}} \
+    algorithm.adv_estimator=grpo \
+    algorithm.norm_adv_by_std_in_grpo=false \
+    data.train_batch_size=128 \
+    data.max_prompt_length=4096 \
+    data.max_response_length=6144 \
+    data.filter_overlong_prompts=True \
+    actor_rollout_ref.actor.optim.lr=5e-5 \
+    actor_rollout_ref.actor.ppo_mini_batch_size=32 \
+    actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=16384 \
+    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.kl_loss_coef=0.001 \
+    actor_rollout_ref.actor.kl_loss_type=low_var_kl \
+    actor_rollout_ref.actor.entropy_coeff=0 \
+    actor_rollout_ref.actor.clip_ratio_high=0.28 \
+    actor_rollout_ref.actor.strategy=fsdp2 \
+    actor_rollout_ref.actor.use_remove_padding=True \
+    actor_rollout_ref.model.use_remove_padding=True \
+    actor_rollout_ref.model.enable_gradient_checkpointing=True \
+    actor_rollout_ref.model.enable_activation_offload=false \
+    actor_rollout_ref.actor.fsdp_config.param_offload=False \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
+    actor_rollout_ref.actor.fsdp_config.offload_policy=False \
+    actor_rollout_ref.rollout.max_num_seqs=128 \
+    actor_rollout_ref.rollout.layered_summon=true \
+    actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.rollout.tensor_model_parallel_size=4 \
+    actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.4 \
+    actor_rollout_ref.rollout.n=8 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=16384 \
+    actor_rollout_ref.rollout.enforce_eager=False \
+    actor_rollout_ref.rollout.load_format=safetensors \
+    actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
+    actor_rollout_ref.ref.fsdp_config.param_offload=True \
+    actor_rollout_ref.ref.strategy=fsdp2 \
+    ++actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16 \
+    ++actor_rollout_ref.ref.fsdp_config.model_dtype=bfloat16 \
+    trainer.critic_warmup=0 \
+    critic.strategy=fsdp2 \
+    data.truncation=right \
+    actor_rollout_ref.actor.checkpoint.save_contents=["model","optimizer","extra"] \
+    2>&1 | tee {{OUTPUT_DIR}}/std_logs.txt
+```
+
+---
+
+**Critical Constraint:**
+- **Base Model:** Use `{{MODEL_NAME}}` exactly (path: `{{MODEL_PATH}}`) -- DO NOT substitute with any other model. The model is pre-downloaded; no re-download needed.
+
+**Fixed Parameters in Reference Bash Script (DO NOT MODIFY these specific values):**
+- `data.train_files={{TRAIN_FILES}}`
+- `data.val_files={{VAL_FILES}}`
+- `custom_reward_function.path={{REWARD_FN_PATH}}`
+- `custom_reward_function.name={{REWARD_FN_NAME}}`
+- `trainer.project_name={{PROJECT_NAME}}`
+- `trainer.save_freq=20`
+- `trainer.test_freq=3`
+- `algorithm.adv_estimator=grpo`
+- `actor_rollout_ref.actor.entropy_coeff=0`
+
+> NOTE: `trainer.resume_mode=disable` and `trainer.total_epochs` are only defaults. When a "Checkpoint Resumption" section is present, follow its training-length instructions exactly — it bounds the run with `trainer.total_training_steps` and a large `trainer.total_epochs` so the step cap governs (NOT the epoch count). For a resumed node it also sets `trainer.resume_mode=resume_path` + `trainer.resume_from_path` (do not keep `resume_mode=disable`); for a from-scratch node it keeps `resume_mode=disable` but still applies the `total_training_steps` cap. Always use the exact `total_training_steps` / `total_epochs` values it specifies.
+
+**Fill in Placeholders**
+1. RUN_NAME should be provided, if not, use LLMZero_<random_8_chars_or_digits>_{{PROJECT_NAME}}
+2. EXPERIMENT_NAME should be <RUN_NAME>_{{PROJECT_NAME}}
+
+{{SLURM_CONSTRAINTS}}
+
+**Requirements:**
+1. Hardcode all values directly (no shell variables)
+2. Use `++` prefix to force override existing YAML parameters where necessary
+3. Optimize hyperparameters to **maximize model performance**
+4. Limit training to a reasonable number of epochs (no more than 10)
+5. Always create the output directory with `mkdir -p` before the python command
+
+---

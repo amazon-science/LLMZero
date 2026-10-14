@@ -1,0 +1,218 @@
+# Tutorial Prompt Generator Configuration
+
+per_execution_timeout: 144000
+
+# Training Framework Configuration
+# Selects the framework plugin that supplies ALL framework-specific knowledge:
+# hyperparameter/metric descriptions, the score direction (maximize vs minimize),
+# the stdout parser, the observer set (build_observers), checkpoint logic, and
+# proposer/early-stopper prompt fragments -- not just HP/metric descriptions.
+# Available: verl_grpo (or register custom frameworks via the training_frameworks registry).
+# See src/autogluon/llmzero/training_frameworks/README.md for the full guide.
+training_framework: verl_grpo
+
+# Validation Configuration
+# Regex pattern to match metric names for validation score (used by the ValidationObserver).
+# The first metric matching this pattern is selected and recorded at first validation,
+# then consistently used for all subsequent validations throughout the run.
+# Required for MCTS node evaluation - without it, nodes cannot be compared.
+# This config key OVERRIDES the selected framework's validation_metric_pattern() default,
+# and is OPTIONAL when that framework already supplies one (verl_grpo does: "val-core/.*__dev").
+
+# Validation score reduction mode: how a run's per-step validation metric becomes the
+# node's MCTS score. One of:
+#   best_validation  (default) - report the direction-aware best across the run
+#                                (highest for maximize, lowest for minimize)
+#   final_validation           - report the last recorded value (e.g. a running-average
+#                                time/step metric for throughput optimization; pair with a
+#                                framework whose score_direction() is "minimize")
+# Defaults to best_validation when unset.
+validation_score_mode: best_validation
+# This pattern is framework-dependent (different frameworks log validation metrics differently).
+# Example patterns:
+#   - "val-core/.*__dev" - matches val-core/simulation__codeio__dev/reward/mean@1
+#   - "core/.*__dev"     - matches core/logic__ordering_puzzle_dataset__dev/reward/mean@1
+validation_metric_pattern: "val-core/.*__dev"
+
+# MCTS (Monte Carlo Tree Search) parameters — ExTS selection (see docs/exts-node-search-plan.md)
+exploration_constant: 1.414    # Exploration weight C (UCT: ~sqrt(2); PUCT: ~1.0)
+max_debug_depth: 5        # Maximum depth of debug nodes in the search tree
+failure_offset: 0             # Non-success runs (failures + no-score) to forgive in the success_rate denominator (0 = none)
+initial_root_children: 1      # Base number of child nodes from root (M_0 for root; widens with progressive widening)
+max_debug_children: 3         # Maximum number of debug child nodes for a single parent node (never widens)
+max_evolve_children: 2        # Base number of evolve child nodes (M_0 for evolve; widens for high-scoring nodes)
+score_temperature: 0.3        # Per-observation exponential shaping temperature (lower = sharper; scale-invariant)
+sibling_dedup: true           # When enabled, proposer sees what sibling nodes already tried to avoid duplicate proposals
+
+# ExTS scoring/selection parameters
+success_rate_alpha: 1.414     # Exponent on success_rate in exploitation (>1 amplifies failures; 1 = linear)
+exploration_type: "uct"       # "uct" (C*sqrt(ln(n_parent)/n_v)) or "puct" (C*n_parent^p/(1+n_v))
+puct_parent_exp: 0.5          # Exponent p on parent visits for PUCT (unused for UCT)
+use_gated_expansion: true     # Gate expansion so only nodes above expansion_gate_quantile spawn new children
+expansion_gate_quantile: 0.25 # Score quantile a node must clear to expand (soft; selection-only)
+use_progressive_widening: true # Grow the child cap for high-scoring / root nodes as visits accrue
+widening_base: 2.0            # Log base for the progressive-widening bonus: floor(log_b(visits/threshold))
+widening_visit_threshold: 32  # Visits before progressive widening begins
+widening_score_quantile: 0.75 # Score quantile an evolve node must clear to widen (root widens unconditionally)
+random_seed: 0                # Seeds the selection RNG (random tie-break + Thompson virtual-child sampling)
+
+# Data Perception
+max_file_group_size_to_show: 5
+num_example_files_to_show: 1
+
+max_chars_per_file: 768
+num_tutorial_retrievals: 30
+max_num_tutorials: 5
+max_user_input_length: 2048
+max_tutorial_length: 32768
+configure_env: false
+condense_tutorials: True
+use_tutorial_summary: True
+stop_after_success: False
+optimize_system_resources: False
+cleanup_unused_env: True
+
+# Compute Infrastructure Configuration
+# Backend for submitting training jobs. Supports: raycluster, conda, docker, slurmdocker
+compute_infra:
+  type: raycluster
+  kubernetes_namespace: "llmzero"
+  # ray_service_name: "my-ray-cluster-head-svc"
+  ray_dashboard_port: 8265
+  # entrypoint_num_gpus: 8  # routes ray job entrypoint to GPU workers
+  # --- conda backend (uncomment and set type: conda to use) ---
+  # type: conda
+  # conda_env: "my_rl_env"
+  # num_gpus: 8
+  # --- docker backend (uncomment and set type: docker to use) ---
+  # type: docker
+  # image: "llmzero-verl:0.9.0"  # built via docker/build.sh; or any local, Docker Hub, or ECR URI
+  # gpu: "all"
+  # shm_size: "16g"
+  # mount_dirs: ["/home/ubuntu/runs", "/home/ubuntu/models"]  # identity-mount host dirs so paths work inside container
+  # volumes: ["/data:/workspace/data"]  # explicit host:container mounts (for non-identity mounts)
+  # --- slurmdocker backend (uncomment and set type: slurmdocker to use) ---
+  # type: slurmdocker
+  # partition: gpu                       # Slurm partition name
+  # container_image: "my-training.sqsh"  # enroot .sqsh file or registry URI
+  # container_mounts: ["/data:/data"]    # host:container bind mounts
+  # num_nodes: 1
+  # gpus_per_node: 8
+  # time_limit: "1-00:00:00"
+  # account: my-slurm-account
+  # --- slurm backend (conda-based, multi-node Ray; uncomment and set type: slurm to use) ---
+  # type: slurm
+  # partition: <slurm-partition>           # Slurm partition name
+  # conda_env: "my_rl_env"                 # conda env activated on compute nodes
+  # num_nodes: 1
+  # gpus_per_node: 8
+  # time_limit: "30-00:00:00"
+  # account: my-slurm-account
+
+# Default LLM Configuration
+# For each agent (coder, etc.) you can use a different one
+llm: &default_llm
+  # Note: bedrock is only supported in limited AWS regions
+  #       and requires AWS credentials
+  provider: bedrock
+  model: "us.anthropic.claude-opus-4-8"
+  max_tokens: 64000
+  proxy_url: null
+  temperature: 0.1
+  top_p: 0.9
+  verbose: True
+  multi_turn: False
+  template: null
+  add_coding_format_instruction: false
+  # Extended thinking (bedrock/Anthropic adaptive-thinking models, e.g. Opus 4.8).
+  # Enabled by default. When on, the API forbids temperature != 1, so temperature
+  # is omitted from the request.
+  #   enabled: turn thinking on/off
+  #   effort:  thinking depth, one of low|medium|high|xhigh|max. Adaptive thinking
+  #            self-caps the trace, so higher is safe up to max_tokens.
+  thinking:
+    enabled: True
+    effort: xhigh
+
+bash_coder:
+  <<: *default_llm  # Merge llm_config
+  multi_turn: False  # Keep stateless for scalability with many nodes
+
+proposer_llm:
+  <<: *default_llm  # Merge llm_config
+  model: "us.anthropic.claude-opus-4-8"
+  max_tokens: 64000  # Opus 4.8 max output limit
+  temperature: 0.7  # Higher temperature for more creative/diverse suggestions
+  top_p: 0.95       # Higher top_p for more diverse token sampling
+  multi_turn: False # Keep stateless for scalability with many nodes
+
+executer:
+  <<: *default_llm  # Merge llm_config
+
+error_analyzer:
+  <<: *default_llm  # Merge llm_config
+
+agentic_proposer:
+  num_samples: 10         # Number of uniform samples for training/validation metrics (for text summaries)
+  use_average: true       # Whether to average within segments (true) or sample at points (false)
+
+  # Metrics to include in text summaries (empty list = no text summaries)
+  # These metrics will be shown as numerical progressions
+  text_metrics:
+    - "response_length/mean"
+    - "critic/rewards/mean"
+
+  # Metrics to visualize as plots (empty list = no plots)
+  # These metrics will be shown as visual charts over training steps
+  # Metrics can appear in both text_metrics and plot_metrics (e.g., rewards as both text AND plot)
+  plot_metrics:
+    - "actor/kl_loss"
+    - "actor/grad_norm"
+    - "critic/rewards/mean"
+    - "response_length/clip_ratio"
+
+  # Note: Validation metrics matching validation_metric_pattern are automatically included in plots
+
+# Checkpoint-based optimization
+# When enabled, evolve nodes can resume from intermediate checkpoints of parent runs
+# instead of training from scratch, saving compute proportional to the repeated prefix.
+checkpoint_optimization:
+  enabled: True
+  min_from_scratch_ratio: 0.2  # Minimum fraction of evolve nodes that train from scratch (0.0 to disable)
+  clean_ckpt: True             # Delete unused checkpoints to save disk space
+  max_steps_per_node: 100      # Hard cap on the number of NEW gradient steps any single node may train,
+                               # applied to ALL nodes (root, from-scratch evolve, and resumed). Enforced via
+                               # trainer.total_training_steps with trainer.total_epochs set large enough to
+                               # guarantee the step budget completes. From-scratch nodes train exactly this
+                               # many steps; resumed nodes train the proposer's ADDITIONAL_TRAINING_STEPS
+                               # (clamped to this value) beyond their resume point. Keeps every node bounded
+                               # so the search keeps branching instead of one node training indefinitely.
+  # Checkpoint stdout grammar (save marker / path / embedded step) is owned by the
+  # training framework's parser (training_frameworks/<name>/parser.py), not config.
+
+# Early Stopper Configuration
+# Compares current training run with best previous run at checkpoint intervals
+early_stopper:
+  enabled: true                     # Enable/disable early stopping
+  checkpoint_interval_seconds: 900  # Time between checkpoint evaluations (15 minutes)
+  min_steps_before_early_stop: 20   # Skip early stopping for the first N steps of each run
+
+  # Number of samples for metric summaries
+  num_samples: 10
+  use_average: true
+
+  # Metrics to include in text comparison analysis (empty list = no text analysis)
+  text_metrics:
+    - "response_length/mean"
+    - "critic/rewards/mean"
+
+  # Metrics to visualize as comparison plots (empty list = no plots)
+  # Each plot shows current run (blue) vs best run (green) overlay
+  # Metrics can appear in both text_metrics and plot_metrics
+  plot_metrics:
+    - "actor/entropy"
+    - "actor/ppo_kl"
+    - "critic/rewards/mean"
+    - "response_length/clip_ratio"
+
+  # Note: Validation metrics matching validation_metric_pattern are automatically included in plots

@@ -1,0 +1,87 @@
+**Task:** Train `{{MODEL_NAME}}` on the specified dataset using GRPO. Optimize to maximize model performance.
+
+---
+
+**Package Default Configuration (reference only)**
+
+The full verl config below is the ACTUAL default for this run — it is loaded by `--config-path`/`--config-name` in the Reference Bash Script. The Reference Bash Script overrides this base config. On any conflict, bash script values win. You may propose additional HP changes to override defaults not covered by the bash script. Use `++` prefix only for parameters NOT already present in this config (most parameters already exist here, so plain `key=value` override is sufficient).
+
+```yaml
+{{BASE_CONFIG_YAML}}
+```
+
+---
+
+**Reference Bash Script (uses {{MODEL_NAME}}):**
+
+The base config (`{{BASE_CONFIG_NAME}}.yaml`) already contains tuned hyperparameters (LoRA rank/alpha, batch sizes, learning rate, rollout settings, etc.). The script below only overrides run-specific paths and a few pinned trainer settings — keep it minimal and inherit everything else from the config.
+
+```bash
+set -x
+
+mkdir -p {{OUTPUT_DIR}}
+
+{{INSTALL_COMMANDS}}
+
+python3 -m verl.trainer.main_ppo \
+    --config-path={{BASE_CONFIG_DIR}} \
+    --config-name={{BASE_CONFIG_NAME}} \
+    data.train_files={{TRAIN_FILES}} \
+    data.val_files={{VAL_FILES}} \
+    actor_rollout_ref.model.path={{MODEL_PATH}} \
+    reward.custom_reward_function.name={{REWARD_FN_NAME}} \
+    reward.custom_reward_function.path={{REWARD_FN_PATH}} \
+    reward.reward_manager.name=naive \
+    trainer.logger={{TRAINER_LOGGER}} \
+    trainer.val_before_train=True \
+    trainer.project_name={{PROJECT_NAME}} \
+    trainer.experiment_name={{EXPERIMENT_NAME}} \
+    trainer.nnodes={{NNODES}} \
+    trainer.n_gpus_per_node={{N_GPUS_PER_NODE}} \
+    trainer.resume_mode=disable \
+    trainer.save_freq=20 \
+    trainer.test_freq=3 \
+    trainer.total_epochs=1 \
+    trainer.default_local_dir={{OUTPUT_DIR}} \
+    trainer.rollout_data_dir={{OUTPUT_DIR}} \
+    trainer.validation_data_dir={{OUTPUT_DIR}} \
+    hydra.run.dir={{OUTPUT_DIR}} \
+    algorithm.adv_estimator=grpo \
+    2>&1 | tee {{OUTPUT_DIR}}/std_logs.txt
+```
+
+---
+
+**Critical Constraint:**
+- **Base Model:** Use `{{MODEL_NAME}}` exactly (path: `{{MODEL_PATH}}`) -- DO NOT substitute with any other model. The model is pre-downloaded; no re-download needed.
+- **Base Config:** Load the provided `{{BASE_CONFIG_NAME}}.yaml` via `--config-path`/`--config-name`. DO NOT inline a different config or drop the `--config-path`/`--config-name` flags — the tuned defaults live in that file.
+
+**Fixed Parameters in Reference Bash Script (DO NOT MODIFY these specific values):**
+- `--config-path={{BASE_CONFIG_DIR}}`
+- `--config-name={{BASE_CONFIG_NAME}}`
+- `data.train_files={{TRAIN_FILES}}`
+- `data.val_files={{VAL_FILES}}`
+- `custom_reward_function.path={{REWARD_FN_PATH}}`
+- `custom_reward_function.name={{REWARD_FN_NAME}}`
+- `trainer.project_name={{PROJECT_NAME}}`
+- `trainer.save_freq=20`
+- `trainer.test_freq=3`
+- `algorithm.adv_estimator=grpo`
+
+> NOTE: `trainer.resume_mode=disable` and `trainer.total_epochs` are only defaults. When a "Checkpoint Resumption" section is present, follow its training-length instructions exactly — it bounds the run with `trainer.total_training_steps` and a large `trainer.total_epochs` so the step cap governs (NOT the epoch count). For a resumed node it also sets `trainer.resume_mode=resume_path` + `trainer.resume_from_path` (do not keep `resume_mode=disable`); for a from-scratch node it keeps `resume_mode=disable` but still applies the `total_training_steps` cap. Always use the exact `total_training_steps` / `total_epochs` values it specifies.
+
+**Fill in Placeholders**
+1. RUN_NAME should be provided, if not, use LLMZero_<random_8_chars_or_digits>_{{PROJECT_NAME}}
+2. EXPERIMENT_NAME should be <RUN_NAME>_{{PROJECT_NAME}}
+
+{{SLURM_CONSTRAINTS}}
+
+**Requirements:**
+1. Hardcode all values directly (no shell variables)
+2. Keep the `--config-path`/`--config-name` flags — they load the tuned base config
+3. Use `++` prefix only for parameters NOT already in the base config; use plain `key=value` to override parameters that are already present
+4. Optimize hyperparameters to **maximize model performance**
+5. Limit training to a reasonable number of epochs (no more than 10)
+6. Always create the output directory with `mkdir -p` before the python command
+
+---

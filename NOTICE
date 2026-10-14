@@ -1,0 +1,48 @@
+LLMZero
+Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+This product includes software developed by third parties. The LLMZero source
+code is licensed under CC BY-NC 4.0 (see the LICENSE file). The third-party
+components listed below are the property of their respective owners and are
+distributed under their own licenses; those licenses are not superseded by
+LLMZero's license. Nothing in this NOTICE grants rights beyond those in each
+component's own license.
+
+Licenses below are indicative of the upstream projects and should be verified
+against the installed versions before redistribution.
+
+Core runtime dependencies
+--------------------------
+- verl (volcengine/verl)                          Apache-2.0
+- vLLM (bundled in the training container image)   Apache-2.0
+- Hugging Face Transformers (via verl)             Apache-2.0
+- PyTorch — torch, torchaudio, torchvision         BSD-3-Clause
+- PEFT                                             Apache-2.0
+- LangChain, LangGraph                             MIT
+- langchain-openai, langchain-anthropic,
+  langchain-aws                                    MIT
+- Pydantic                                         MIT
+- Hydra (hydra-core)                               MIT
+- Typer                                            MIT
+- Rich                                             MIT
+- Flask                                            BSD-3-Clause
+- Streamlit, streamlit-aggrid, streamlit-extras    Apache-2.0 (aggrid: MIT)
+- pandas                                           BSD-3-Clause
+- NumPy (transitive)                               BSD-3-Clause
+- matplotlib                                       Matplotlib License (BSD-style/PSF)
+- opencv-python                                    Apache-2.0 (OpenCV >= 4.5)
+- reportlab                                        BSD-3-Clause
+- boto3, s3fs                                      Apache-2.0
+- fsspec, joblib                                   BSD-3-Clause
+- tenacity, aiohttp, requests                      Apache-2.0
+- fastmcp, mcp (Model Context Protocol SDK)        MIT
+- python-calamine                                  MIT
+- importlib-resources                              Apache-2.0
+- psutil                                           BSD-3-Clause
+- chardet                                          LGPL-2.1
+
+The GPU training container image (docker/Dockerfile.verl) is vendored from verl's
+Dockerfile.stable.vllm and additionally bundles vLLM, Transformers, CUDA runtime
+libraries, and other components under their respective licenses.
+
+Full license texts for the above are available from each project's distribution.

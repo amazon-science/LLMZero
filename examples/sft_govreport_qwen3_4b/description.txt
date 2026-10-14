@@ -1,0 +1,71 @@
+# Task: Supervised fine-tuning (LoRA) of Qwen3-4B on LONG-CONTEXT government-report summarization (GovReport-SFT), minimizing validation loss (val/loss). Starting point is verl's DEFAULT SFT hyperparameters; the search tunes from that baseline.
+
+Framework: verl_sft (verl 0.9.0 supervised fine-tuning via `torchrun ... -m verl.trainer.sft_trainer --config-name=sft_trainer_engine`). Compute: slurmdocker, <slurm_partition>, verl container (docker/llmzero-verl-0.9.0.sqsh).
+This is SFT on a `messages`-schema parquet — NO reward function, NO rollouts. Loss is computed only on assistant turns (the gold summary).
+
+## SINGLE-SHOT search (checkpointing DISABLED)
+checkpoint_optimization is DISABLED. Every node (root, evolve, debug) trains its OWN complete config FROM THE BASE MODEL with a fresh optimizer. There is NO continuous training, NO checkpoint chaining, NO resume. Each node is an independent full SFT run compared on val/loss. Do NOT add `trainer.resume_mode=resume_path` / `trainer.resume_from_path` / `checkpoint.load_contents` overrides.
+
+## Baseline = verl DEFAULT hyperparameters
+The Reference Bash Script encodes verl 0.9.0's default SFT hyperparameters, with ONLY task-structural values set to functional settings (required for the task, NOT tuning choices):
+  - LONG-CONTEXT knobs (memory-safety, see below): `data.max_length=32768`, `data.use_dynamic_bsz=true`, `data.max_token_len_per_gpu=8192`, `engine.ulysses_sequence_parallel_size=8`, `data.micro_batch_size_per_gpu=1`.
+  - LoRA enabled: `model.lora_rank=32`, `model.lora_alpha=32`, `model.target_modules=all-linear` (verl's raw default lora_rank=0 = full fine-tune; LoRA is the intended regime here).
+  - data paths, model path, `data.messages_key=messages`.
+Everything else (learning rate, scheduler, weight decay, warmup, batch size, epochs) starts at verl's DEFAULT. The proposer TUNES these from the verl-default baseline to lower val/loss.
+
+## LONG-CONTEXT (defining property)
+GovReport documents are long: rendered conversation (system + full report + gold summary) median ~9.6k tokens, p95 ~24.5k, max ~257k. To train without truncating the gold summary (at the END, where `truncation=right` would clip it):
+  - `data.max_length=32768` covers ~98-99% of rows end-to-end.
+  - Ulysses SEQUENCE PARALLELISM `engine.ulysses_sequence_parallel_size=8` splits each long sequence across the 8 GPUs of a node so a long doc's activations fit in 80GB.
+  - Dynamic batching `data.use_dynamic_bsz=true`, `data.max_token_len_per_gpu=8192` (verl asserts max_token_len_per_gpu * sp_size >= longest sequence within a micro-batch).
+These are FIXED (memory-safety, NOT tunable). Do NOT lower max_length (clips the target), remove SP, or raise micro_batch_size_per_gpu.
+
+## slurmdocker launch gotchas (verl 0.9.0 — keep verbatim)
+- Prefix torchrun with `env -u RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES -u ROCR_VISIBLE_DEVICES`. The backend exports `RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES=1` (for the GRPO Ray path) and the container sets `ROCR_VISIBLE_DEVICES`; both break the SFT torchrun/SPMD device selection. In verl 0.9.0 the worker raises `ValueError: Please don't set ROCR_VISIBLE_DEVICES when HIP/CUDA_VISIBLE_DEVICES is set.` if ROCR is set, and an IndexError if the RAY var is set. Unset both.
+- Do NOT export `PYTORCH_CUDA_ALLOC_CONF` (torch validates it strictly at cuda init; lowercase booleans crash all ranks).
+- `trainer.logger=["console"]` — wandb env does not propagate to verl workers on slurmdocker.
+
+Reference training command (verl-default SFT HP baseline; STARTING point — the proposer tunes lr/scheduler/wd/warmup/batch/epochs from here):
+
+    set -x
+    export WANDB_MODE=disabled WANDB_DISABLED=true TOKENIZERS_PARALLELISM=false
+    env -u RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES -u ROCR_VISIBLE_DEVICES \
+    torchrun --standalone --nnodes=1 --nproc_per_node=8 -m verl.trainer.sft_trainer \
+      --config-name=sft_trainer_engine \
+      data.train_files=["/fsx/users/example/runs/sft_govreport_qwen3_4b/data/train.parquet"] \
+      data.val_files=["/fsx/users/example/runs/sft_govreport_qwen3_4b/data/val.parquet"] \
+      data.messages_key=messages \
+      data.max_length=32768 \
+      data.truncation=right \
+      data.ignore_input_ids_mismatch=true \
+      data.use_dynamic_bsz=true \
+      data.max_token_len_per_gpu=8192 \
+      engine.ulysses_sequence_parallel_size=8 \
+      data.train_batch_size=64 \
+      data.micro_batch_size_per_gpu=1 \
+      model.path=/fsx/users/example/models/Qwen/Qwen3-4B \
+      model.lora_rank=32 \
+      model.lora_alpha=32 \
+      model.target_modules=all-linear \
+      optim.lr=1e-4 \
+      optim.lr_scheduler_type=cosine \
+      optim.lr_warmup_steps_ratio=0.03 \
+      trainer.total_epochs=1 \
+      trainer.save_freq=20 \
+      trainer.test_freq=20 \
+      trainer.logger=["console"] \
+      trainer.project_name=sft_govreport_qwen3_4b \
+      trainer.experiment_name={node_output_folder_name} \
+      trainer.default_local_dir=/fsx/users/example/runs/sft_govreport_qwen3_4b/verl_ckpts/{node_output_folder_name}
+
+verl SFT saves checkpoints FLAT under `<default_local_dir>/global_step_N/`. Keep save_freq/test_freq at a modest interval (e.g. 20) so val/loss is logged periodically. Validation over the 500-row long-context val set is SLOW (SP=8, long docs) — do not set test_freq too small. Train has ~273 steps/epoch at train_batch_size=64.
+
+## Dataset notes
+GovReport-SFT: each example pairs a full U.S. government report (system = summarization instruction, user = full document) with an expert executive summary (assistant turn). Loss on assistant turns only. The val split is in-distribution held-out, so val/loss is a faithful proxy for summarization quality (ROUGE geometric-mean "scrolls_score") on the held-out test set (offline eval, separate from the search).
+- Train: 17457 rows (`govreport_sft`). Val: 500 rows (`govreport_sft__dev`). Test: 500 rows (GRPO-format, for offline reward eval).
+
+## Notes
+- LLMZero tracks a SINGLE validation metric: `val/loss`. LOWER IS BETTER — score_direction MINIMIZE.
+- Model is FIXED: Qwen3-4B at /fsx/users/example/models/Qwen/Qwen3-4B. Do NOT substitute.
+- data paths, messages schema, project_name, and the LONG-CONTEXT knobs are FIXED. lr/scheduler/wd/warmup/batch/epochs start at verl defaults and are tunable.
+- No bash variables; hardcode all values.
